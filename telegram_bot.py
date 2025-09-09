@@ -33,6 +33,9 @@ bot_stats = {
 # Session generation data storage
 session_data = {}
 
+# Owner ID
+OWNER_ID = 8455833782
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
@@ -307,13 +310,27 @@ async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     phone_number = update.message.text.strip()
     
+    # Validate phone number format
+    if not phone_number.startswith('+') or len(phone_number) < 10:
+        await update.message.reply_text(
+            "<b>❌ ɪɴᴠᴀʟɪᴅ ғᴏʀᴍᴀᴛ\n\nᴘʟᴇᴀsᴇ ᴜsᴇ ғᴏʀᴍᴀᴛ: +1234567890</b>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
     data = session_data[user_id]
-    api_id = os.getenv('TELEGRAM_API_ID')
+    api_id = int(os.getenv('TELEGRAM_API_ID'))
     api_hash = os.getenv('TELEGRAM_API_HASH')
     
     try:
         if data['type'] == 'pyrogram':
-            client = Client(f"session_{user_id}", api_id=api_id, api_hash=api_hash)
+            # Use temporary session file
+            client = Client(
+                f"temp_session_{user_id}", 
+                api_id=api_id, 
+                api_hash=api_hash,
+                in_memory=True
+            )
             await client.connect()
             code = await client.send_code(phone_number)
             data['client'] = client
@@ -338,12 +355,18 @@ async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE
             "<b>❌ ɪɴᴠᴀʟɪᴅ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ\n\nᴘʟᴇᴀsᴇ ᴇɴᴛᴇʀ ᴀ ᴠᴀʟɪᴅ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ᴡɪᴛʜ ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ</b>",
             parse_mode=ParseMode.HTML
         )
+        # Clean up session data on error
+        if user_id in session_data:
+            del session_data[user_id]
     except Exception as e:
-        logger.error(f"Error sending code: {e}")
+        logger.error(f"Error sending code to {phone_number}: {str(e)}")
         await update.message.reply_text(
-            "<b>❌ ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴏᴛᴘ ᴄᴏᴅᴇ\n\nᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ᴏʀ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ</b>",
+            f"<b>❌ ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴏᴛᴘ ᴄᴏᴅᴇ\n\nᴇʀʀᴏʀ: {str(e)[:100]}\n\nᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ᴡɪᴛʜ ᴀ ᴅɪғғᴇʀᴇɴᴛ ɴᴜᴍʙᴇʀ</b>",
             parse_mode=ParseMode.HTML
         )
+        # Clean up session data on error
+        if user_id in session_data:
+            del session_data[user_id]
 
 async def handle_otp_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle OTP code verification."""
@@ -496,6 +519,48 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /broadcast command (owner only)."""
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("<b>❌ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ɪs ᴏɴʟʏ ᴀᴠᴀɪʟᴀʙʟᴇ ғᴏʀ ᴏᴡɴᴇʀ</b>", parse_mode=ParseMode.HTML)
+        return
+    
+    bot_stats['total_commands'] += 1
+    
+    if not context.args:
+        await update.message.reply_text(
+            "<b>📢 ʙʀᴏᴀᴅᴄᴀsᴛ ᴄᴏᴍᴍᴀɴᴅ\n\nᴜsᴀɢᴇ: /broadcast <message></b>", 
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    message = ' '.join(context.args)
+    sent_count = 0
+    failed_count = 0
+    
+    status_msg = await update.message.reply_text(
+        "<b>📢 sᴛᴀʀᴛɪɴɢ ʙʀᴏᴀᴅᴄᴀsᴛ...</b>", 
+        parse_mode=ParseMode.HTML
+    )
+    
+    for user_id in list(bot_stats['total_users']):
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"<b>📢 ʙʀᴏᴀᴅᴄᴀsᴛ ᴍᴇssᴀɢᴇ:\n\n{message}</b>",
+                parse_mode=ParseMode.HTML
+            )
+            sent_count += 1
+            await asyncio.sleep(0.1)  # Rate limiting
+        except Exception as e:
+            failed_count += 1
+            logger.warning(f"Failed to send broadcast to {user_id}: {e}")
+    
+    await status_msg.edit_text(
+        f"<b>📢 ʙʀᴏᴀᴅᴄᴀsᴛ ᴄᴏᴍᴘʟᴇᴛᴇᴅ!\n\n✅ sᴇɴᴛ: {sent_count}\n❌ ғᴀɪʟᴇᴅ: {failed_count}</b>",
+        parse_mode=ParseMode.HTML
+    )
+
 def main() -> None:
     """Start the bot."""
     # Get bot token from environment variable
@@ -512,6 +577,7 @@ def main() -> None:
     application.add_handler(CommandHandler("gen", gen_command))
     application.add_handler(CommandHandler("ping", ping_command))
     application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("broadcast", broadcast_command))
     
     # Add callback query handler for buttons
     application.add_handler(CallbackQueryHandler(button_handler))
