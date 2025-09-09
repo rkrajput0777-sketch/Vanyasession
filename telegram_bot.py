@@ -381,16 +381,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await handle_2fa_password(update, context)
 
 async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle phone number input."""
+    """Handle phone number input with enhanced validation."""
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
-    phone_number = update.message.text.strip()
+    phone_number = update.message.text.strip() if update.message.text else ""
     
-    # Validate phone number format
-    if not phone_number.startswith('+') or len(phone_number) < 10:
+    # Enhanced phone number validation
+    is_valid, validation_message = validate_phone_number(phone_number)
+    if not is_valid:
         await update.message.reply_text(
-            "<b>❌ ɪɴᴠᴀʟɪᴅ ғᴏʀᴍᴀᴛ\n\nᴘʟᴇᴀsᴇ ᴜsᴇ ғᴏʀᴍᴀᴛ: +1234567890</b>",
+            f"<b>❌ ɪɴᴠᴀʟɪᴅ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ\n\n{validation_message}</b>",
             parse_mode=ParseMode.HTML
         )
+        await log_to_group(context, f"Invalid phone number attempt: {phone_number} by user {user_id}", "WARNING")
         return
     
     data = session_data[user_id]
@@ -420,33 +425,66 @@ async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE
         data['phone_number'] = phone_number
         data['step'] = 'otp'
         
+        # Enhanced OTP request message with format guidance
+        otp_message = f"""<b>✅ ᴏᴛᴘ ᴄᴏᴅᴇ sᴇɴᴛ ᴛᴏ {phone_number}
+
+🔢 ᴘʟᴇᴀsᴇ sᴇɴᴅ ᴛʜᴇ 5-ᴅɪɢɪᴛ ᴄᴏᴅᴇ:
+
+📝 ғᴏʀᴍᴀᴛ ᴇxᴀᴍᴘʟᴇs:
+• 12345
+• 1 2 3 4 5
+• 1-2-3-4-5
+
+⏰ ᴄᴏᴅᴇ ᴇxᴘɪʀᴇs ɪɴ 10 ᴍɪɴᴜᴛᴇs</b>"""
+        
         await update.message.reply_text(
-            f"<b>✅ ᴏᴛᴘ ᴄᴏᴅᴇ sᴇɴᴛ ᴛᴏ {phone_number}\n\nᴘʟᴇᴀsᴇ sᴇɴᴅ ᴛʜᴇ 5-ᴅɪɢɪᴛ ᴄᴏᴅᴇ ʏᴏᴜ ʀᴇᴄᴇɪᴠᴇᴅ</b>",
+            otp_message,
             parse_mode=ParseMode.HTML
         )
         
-    except PhoneNumberInvalidError:
-        await update.message.reply_text(
-            "<b>❌ ɪɴᴠᴀʟɪᴅ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ\n\nᴘʟᴇᴀsᴇ ᴇɴᴛᴇʀ ᴀ ᴠᴀʟɪᴅ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ᴡɪᴛʜ ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ</b>",
-            parse_mode=ParseMode.HTML
-        )
+        # Log successful code sending
+        await log_to_group(context, f"OTP sent successfully to {phone_number} for user {user_id}", "SUCCESS")
+        
+    except (PhoneNumberInvalidError, PhoneNumberInvalid) as e:
+        error_msg = "<b>❌ ɪɴᴠᴀʟɪᴅ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ\n\n📱 ᴛʜɪs ɴᴜᴍʙᴇʀ ɪs ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ ᴏɴ ᴛᴇʟᴇɢʀᴀᴍ\n\n🔸 ᴄʜᴇᴄᴋ ʏᴏᴜʀ ɴᴜᴍʙᴇʀ\n🔸 ɪɴᴄʟᴜᴅᴇ ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ\n🔸 ᴇxᴀᴍᴘʟᴇ: +1234567890</b>"
+        await update.message.reply_text(error_msg, parse_mode=ParseMode.HTML)
+        await log_to_group(context, f"Invalid phone number error for {phone_number} by user {user_id}: {str(e)}", "ERROR")
         # Clean up session data on error
         if user_id in session_data:
             del session_data[user_id]
     except Exception as e:
         logger.error(f"Error sending code to {phone_number}: {str(e)}")
-        await update.message.reply_text(
-            f"<b>❌ ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴏᴛᴘ ᴄᴏᴅᴇ\n\nᴇʀʀᴏʀ: {str(e)[:100]}\n\nᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ᴡɪᴛʜ ᴀ ᴅɪғғᴇʀᴇɴᴛ ɴᴜᴍʙᴇʀ</b>",
-            parse_mode=ParseMode.HTML
-        )
+        error_msg = f"<b>❌ ғᴀɪʟᴇᴅ ᴛᴏ sᴇɴᴅ ᴏᴛᴘ ᴄᴏᴅᴇ\n\n🔧 ᴛᴇᴄʜɴɪᴄᴀʟ ᴇʀʀᴏʀ ᴏᴄᴄᴜʀʀᴇᴅ\n\n💡 sᴏʟᴜᴛɪᴏɴs:\n• ᴛʀʏ ᴀɢᴀɪɴ ɪɴ 1 ᴍɪɴᴜᴛᴇ\n• ᴄʜᴇᴄᴋ ʏᴏᴜʀ ɪɴᴛᴇʀɴᴇᴛ\n• ᴜsᴇ ᴀ ᴅɪғғᴇʀᴇɴᴛ ɴᴜᴍʙᴇʀ</b>"
+        await update.message.reply_text(error_msg, parse_mode=ParseMode.HTML)
+        await log_to_group(context, f"Technical error sending OTP to {phone_number} by user {user_id}: {str(e)}", "ERROR")
         # Clean up session data on error
         if user_id in session_data:
             del session_data[user_id]
 
 async def handle_otp_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle OTP code verification."""
+    """Handle OTP code verification with enhanced validation."""
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
-    otp_code = update.message.text.strip()
+    otp_code = update.message.text.strip() if update.message.text else ""
+    
+    # Enhanced OTP validation
+    is_valid, validation_message = validate_otp_code(otp_code)
+    if not is_valid:
+        await update.message.reply_text(
+            f"<b>❌ ɪɴᴠᴀʟɪᴅ ᴏᴛᴘ ᴄᴏᴅᴇ\n\n{validation_message}</b>",
+            parse_mode=ParseMode.HTML
+        )
+        await log_to_group(context, f"Invalid OTP attempt: {otp_code} by user {user_id}", "WARNING")
+        return
+    
+    if user_id not in session_data:
+        await update.message.reply_text(
+            "<b>❌ sᴇssɪᴏɴ ᴇxᴘɪʀᴇᴅ\n\nᴘʟᴇᴀsᴇ sᴛᴀʀᴛ ᴀɢᴀɪɴ ᴡɪᴛʜ /start</b>",
+            parse_mode=ParseMode.HTML
+        )
+        return
     
     data = session_data[user_id]
     
