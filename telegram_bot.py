@@ -43,6 +43,47 @@ LOG_GROUP_ID: int = -1002563257842
 # Phone number validation pattern
 PHONE_PATTERN = re.compile(r'\+[1-9]\d{1,3}[1-9]\d{4,14}$')
 
+# Safe message editing function
+async def edit_message_safely(query, message: str, reply_markup=None) -> None:
+    """Safely edit message whether it's a photo or text message."""
+    try:
+        # Try editing as caption first (for photo messages)
+        if reply_markup:
+            await query.edit_message_caption(
+                caption=message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+        else:
+            await query.edit_message_caption(
+                caption=message,
+                parse_mode=ParseMode.HTML
+            )
+    except:
+        try:
+            # Fallback to editing as text message
+            if reply_markup:
+                await query.edit_message_text(
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
+            else:
+                await query.edit_message_text(
+                    message,
+                    parse_mode=ParseMode.HTML
+                )
+        except:
+            # If both fail, send a new message
+            try:
+                await query.message.reply_text(
+                    message,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.error(f"Failed to edit or send message: {e}")
+
 # Enhanced logging function for log group
 async def log_to_group(context: ContextTypes.DEFAULT_TYPE, message: str, level: str = "INFO") -> None:
     """Send logs to the designated log group."""
@@ -235,10 +276,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
     
     elif query.data == 'pyrogram_gen':
-        await start_pyrogram_session(update, context)
+        try:
+            await start_pyrogram_session(update, context)
+        except Exception as e:
+            logger.error(f"Error in pyrogram session start: {e}")
+            await log_to_group(context, f"Pyrogram session start error: {e}", "ERROR")
     
     elif query.data == 'telethon_gen':
-        await start_telethon_session(update, context)
+        try:
+            await start_telethon_session(update, context)
+        except Exception as e:
+            logger.error(f"Error in telethon session start: {e}")
+            await log_to_group(context, f"Telethon session start error: {e}", "ERROR")
     
     elif query.data == 'basic_guides':
         keyboard = [
@@ -332,10 +381,7 @@ async def start_pyrogram_session(update: Update, context: ContextTypes.DEFAULT_T
     
     if not api_id or not api_hash:
         error_message = "<b>❌ ᴀᴘɪ ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴇʀʀᴏʀ\n\nᴘʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ ᴀᴅᴍɪɴ</b>"
-        try:
-            await query.edit_message_caption(caption=error_message, parse_mode=ParseMode.HTML)
-        except:
-            await query.edit_message_text(error_message, parse_mode=ParseMode.HTML)
+        await edit_message_safely(query, error_message)
         return
     
     # Store session generation type
@@ -343,10 +389,7 @@ async def start_pyrogram_session(update: Update, context: ContextTypes.DEFAULT_T
     
     phone_message = "<b>📱 ᴘʏʀᴏɢʀᴀᴍ sᴇssɪᴏɴ ɢᴇɴᴇʀᴀᴛɪᴏɴ\n\n🔢 ᴘʟᴇᴀsᴇ sᴇɴᴅ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ:\n\n📝 ғᴏʀᴍᴀᴛ: +[ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ][ɴᴜᴍʙᴇʀ]\n🔸 ᴇxᴀᴍᴘʟᴇ: +1234567890\n🔸 ᴇxᴀᴍᴘʟᴇ: +91234567890</b>"
     
-    try:
-        await query.edit_message_caption(caption=phone_message, parse_mode=ParseMode.HTML)
-    except:
-        await query.edit_message_text(phone_message, parse_mode=ParseMode.HTML)
+    await edit_message_safely(query, phone_message)
 
 async def start_telethon_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start Telethon session generation."""
@@ -361,10 +404,7 @@ async def start_telethon_session(update: Update, context: ContextTypes.DEFAULT_T
     
     if not api_id or not api_hash:
         error_message = "<b>❌ ᴀᴘɪ ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ ᴇʀʀᴏʀ\n\nᴘʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ ᴀᴅᴍɪɴ</b>"
-        try:
-            await query.edit_message_caption(caption=error_message, parse_mode=ParseMode.HTML)
-        except:
-            await query.edit_message_text(error_message, parse_mode=ParseMode.HTML)
+        await edit_message_safely(query, error_message)
         return
     
     # Store session generation type
@@ -372,10 +412,7 @@ async def start_telethon_session(update: Update, context: ContextTypes.DEFAULT_T
     
     phone_message = "<b>📱 ᴛᴇʟᴇᴛʜᴏɴ sᴇssɪᴏɴ ɢᴇɴᴇʀᴀᴛɪᴏɴ\n\n🔢 ᴘʟᴇᴀsᴇ sᴇɴᴅ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ:\n\n📝 ғᴏʀᴍᴀᴛ: +[ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ][ɴᴜᴍʙᴇʀ]\n🔸 ᴇxᴀᴍᴘʟᴇ: +1234567890\n🔸 ᴇxᴀᴍᴘʟᴇ: +91234567890</b>"
     
-    try:
-        await query.edit_message_caption(caption=phone_message, parse_mode=ParseMode.HTML)
-    except:
-        await query.edit_message_text(phone_message, parse_mode=ParseMode.HTML)
+    await edit_message_safely(query, phone_message)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle text messages for session generation."""
