@@ -532,9 +532,26 @@ async def handle_otp_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 async def handle_2fa_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle 2FA password verification."""
+    """Handle 2FA password verification with enhanced error handling."""
+    if not update.effective_user or not update.message:
+        return
+        
     user_id = update.effective_user.id
-    password = update.message.text.strip()
+    password = update.message.text.strip() if update.message.text else ""
+    
+    if not password:
+        await update.message.reply_text(
+            "<b>❌ ᴇᴍᴘᴛʏ ᴘᴀssᴡᴏʀᴅ\n\nᴘʟᴇᴀsᴇ ᴇɴᴛᴇʀ ʏᴏᴜʀ 2ғᴀ ᴘᴀssᴡᴏʀᴅ</b>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    
+    if user_id not in session_data:
+        await update.message.reply_text(
+            "<b>❌ sᴇssɪᴏɴ ᴇxᴘɪʀᴇᴅ\n\nᴘʟᴇᴀsᴇ sᴛᴀʀᴛ ᴀɢᴀɪɴ ᴡɪᴛʜ /start</b>",
+            parse_mode=ParseMode.HTML
+        )
+        return
     
     data = session_data[user_id]
     
