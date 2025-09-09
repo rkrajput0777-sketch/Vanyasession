@@ -4,7 +4,9 @@ import os
 import time
 import asyncio
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram._update import Update
+from telegram._inline.inlinekeyboardbutton import InlineKeyboardButton
+from telegram._inline.inlinekeyboardmarkup import InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 from telegram.constants import ParseMode
 from pyrogram import Client
