@@ -4,11 +4,14 @@ import os
 import time
 import asyncio
 import tempfile
+import re
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from typing import Dict, Any, Optional, Union
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
-from pyrogram import Client
+from pyrogram.client import Client
+from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneNumberInvalid
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneNumberInvalidError
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 PHONE_NUMBER, OTP_CODE, TWO_FA_PASSWORD = range(3)
 
 # Bot statistics
-bot_stats = {
+bot_stats: Dict[str, Any] = {
     'start_time': time.time(),
     'total_users': set(),
     'sessions_generated': 0,
@@ -31,14 +34,72 @@ bot_stats = {
 }
 
 # Session generation data storage
-session_data = {}
+session_data: Dict[int, Dict[str, Any]] = {}
 
-# Owner ID
-OWNER_ID = 8455833782
+# Owner and log group IDs
+OWNER_ID: int = 8455833782
+LOG_GROUP_ID: int = -1002563257842
+
+# Phone number validation pattern
+PHONE_PATTERN = re.compile(r'\+[1-9]\d{1,3}[1-9]\d{4,14}$')
+
+# Enhanced logging function for log group
+async def log_to_group(context: ContextTypes.DEFAULT_TYPE, message: str, level: str = "INFO") -> None:
+    """Send logs to the designated log group."""
+    try:
+        log_message = f"<b>🤖 BOT LOG [{level}]</b>\n\n<code>{message}</code>\n\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        await context.bot.send_message(
+            chat_id=LOG_GROUP_ID,
+            text=log_message,
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logger.error(f"Failed to send log to group: {e}")
+
+# Enhanced phone number validation
+def validate_phone_number(phone: str) -> tuple[bool, str]:
+    """Validate phone number format and provide detailed feedback."""
+    if not phone:
+        return False, "📱 Please enter your phone number"
+    
+    phone = phone.strip().replace(" ", "").replace("-", "")
+    
+    if not phone.startswith("+"):
+        return False, "📱 Phone number must start with + and country code\n\n🔸 Example: +1234567890"
+    
+    if len(phone) < 8:
+        return False, "📱 Phone number is too short\n\n🔸 Include country code: +1234567890"
+    
+    if len(phone) > 16:
+        return False, "📱 Phone number is too long\n\n🔸 Maximum 15 digits after +"
+    
+    if not PHONE_PATTERN.match(phone):
+        return False, "📱 Invalid phone number format\n\n🔸 Use format: +[country code][number]\n🔸 Example: +1234567890"
+    
+    return True, "✅ Valid phone number format"
+
+# Enhanced OTP validation
+def validate_otp_code(otp: str) -> tuple[bool, str]:
+    """Validate OTP code format with detailed feedback."""
+    if not otp:
+        return False, "🔢 Please enter the OTP code"
+    
+    otp = otp.strip().replace(" ", "").replace("-", "")
+    
+    if not otp.isdigit():
+        return False, "🔢 OTP must contain only numbers\n\n🔸 Format: 12345 (5 digits)"
+    
+    if len(otp) != 5:
+        return False, f"🔢 OTP must be exactly 5 digits\n\n🔸 You entered: {len(otp)} digits\n🔸 Required: 5 digits (12345)"
+    
+    return True, "✅ Valid OTP format"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
-    user = update.effective_user
+    if not update.effective_user or not update.message:
+        return
+        
+    user: User = update.effective_user
     bot = context.bot
     
     # Track user
@@ -88,9 +149,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle button presses."""
+    """Handle button presses with enhanced error handling."""
+    if not update.callback_query:
+        return
+        
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+        
+        # Log button interaction
+        user_info = f"User: {query.from_user.id if query.from_user else 'Unknown'} | Action: {query.data}"
+        await log_to_group(context, f"Button pressed: {user_info}", "INFO")
+    except Exception as e:
+        logger.error(f"Error in button handler: {e}")
+        await log_to_group(context, f"Button handler error: {e}", "ERROR")
+        return
     
     if query.data == 'generate_session':
         keyboard = [
@@ -143,7 +216,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 🔥 ᴛᴇʟᴇᴛʜᴏɴ  
 • sᴛᴀʙʟᴇ ᴀɴᴅ ʀᴇʟɪᴀʙʟᴇ
 • ᴀᴅᴠᴀɴᴄᴇᴅ ғᴇᴀᴛᴜʀᴇs
-• ᴡɪᴅᴇʟʏ ᴜsᴇᴅ</b>"""
+• ᴡɪᴅᴇʟʏ ᴜsᴇᴅ
+
+⚡ ʀᴇᴀᴅʏ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ - ᴄʟɪᴄᴋ ʙᴇʟᴏᴡ!</b>"""
         
         try:
             await query.edit_message_caption(
